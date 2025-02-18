@@ -10,6 +10,8 @@ class _CustomFileUpload extends StatefulWidget {
     required this.title,
     required this.onFileChosen,
     required this.readOnly,
+    this.fileData,
+    this.resolution = CameraResolution.max,
   });
 
   final bool hasFilePicker;
@@ -18,8 +20,10 @@ class _CustomFileUpload extends StatefulWidget {
   final bool isVideoAllowed;
   final List<String>? acceptedExtensions;
   final String? title;
-  final void Function(String value) onFileChosen;
+  final void Function(String? value) onFileChosen;
   final bool readOnly;
+  final String? fileData;
+  final CameraResolution resolution;
 
   @override
   State<_CustomFileUpload> createState() => _CustomFileUploadState();
@@ -27,10 +31,16 @@ class _CustomFileUpload extends StatefulWidget {
 
 class _CustomFileUploadState extends State<_CustomFileUpload>
     with WidgetsBindingObserver {
-  XFile? _file;
+  String? _file;
   late String? _fileName;
 
   bool _isLoading = false;
+
+  @override
+  void initState() {
+    _file = widget.fileData;
+    super.initState();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -43,45 +53,65 @@ class _CustomFileUploadState extends State<_CustomFileUpload>
             padding: const EdgeInsets.only(bottom: 10),
             child: Text(widget.title!),
           ),
-        Row(
-          children: [
-            if (widget.hasFilePicker) ...[
-              ElevatedButton(
-                onPressed: widget.readOnly ? null : _openSingleFile,
-                child: const Text('Choose File'),
+        if (_file != null)
+          Row(
+            children: [
+              FilePreview(
+                fileData: _file!,
               ),
-              const SizedBox(width: 20),
+              const SizedBox(width: 10),
+              IconButton(
+                onPressed: widget.readOnly
+                    ? null
+                    : () {
+                        _file = null;
+                        widget.onFileChosen(null);
+                        setState(() {});
+                      },
+                icon: const Icon(Icons.delete),
+              ),
             ],
-            if (widget.hasCameraButton) ...[
-              ElevatedButton(
-                onPressed: widget.readOnly ? null : _openCamera,
-                child: Text(_getCameraButtonText()),
-              ),
-              const SizedBox(width: 20),
+          )
+        else
+          Row(
+            children: [
+              if (widget.hasFilePicker) ...[
+                ElevatedButton(
+                  onPressed: widget.readOnly ? null : _openSingleFile,
+                  child: const Text('Choose File'),
+                ),
+                const SizedBox(width: 20),
+              ],
+              if (widget.hasCameraButton) ...[
+                ElevatedButton(
+                  onPressed: widget.readOnly ? null : _openCamera,
+                  child: Text(_getCameraButtonText()),
+                ),
+                const SizedBox(width: 20),
+              ],
+              if (_isLoading)
+                const CircularProgressIndicator()
+              else if (_file == null)
+                const Text('No file chosen')
+              else
+                Row(
+                  children: [
+                    Text(_fileName!),
+                    const SizedBox(width: 10),
+                    IconButton(
+                      onPressed: widget.readOnly
+                          ? null
+                          : () {
+                              _file = null;
+                              widget.onFileChosen(null);
+                              setState(() {});
+                            },
+                      icon: const Icon(Icons.delete),
+                    ),
+                  ],
+                ),
             ],
-            if (_isLoading)
-              const CircularProgressIndicator()
-            else if (_file == null)
-              const Text('No file chosen')
-            else
-              Row(
-                children: [
-                  Text(_fileName!),
-                  const SizedBox(width: 10),
-                  IconButton(
-                    onPressed: widget.readOnly
-                        ? null
-                        : () {
-                            _file = null;
-                            widget.onFileChosen('');
-                            setState(() {});
-                          },
-                    icon: const Icon(Icons.delete),
-                  ),
-                ],
-              ),
-          ],
-        ),
+          ),
         const SizedBox(height: 10),
       ],
     );
@@ -105,22 +135,18 @@ class _CustomFileUploadState extends State<_CustomFileUpload>
     );
 
     if (selectedFile != null) {
+      final base64 = await selectedFile.getBase64();
       if (mounted) setState(() => _isLoading = true);
 
       try {
-        final encodedFile = kIsWeb
-            ? await _encodeFileForWeb(selectedFile)
-            : await _encodeFileInIsolate(selectedFile.path);
-
         widget.onFileChosen(
           // ignore: lines_longer_than_80_chars
-          'data:${selectedFile.mimeType};name=${selectedFile.name};base64,$encodedFile',
+          base64,
         );
-
         if (mounted) {
           setState(() {
-            _file = selectedFile;
-            _fileName = _file!.name;
+            _file = base64;
+            _fileName = selectedFile.name;
           });
         }
       } catch (e) {
@@ -137,74 +163,27 @@ class _CustomFileUploadState extends State<_CustomFileUpload>
     final file = await Navigator.of(context).push<XFile?>(
       MaterialPageRoute(
         builder: (context) {
-          return _CameraScreen(
+          return CameraScreen(
             isPhotoAllowed: widget.isPhotoAllowed,
             isVideoAllowed: widget.isVideoAllowed,
+            resolution: widget.resolution,
           );
         },
       ),
     );
 
     if (file != null) {
-      final encodedFile = kIsWeb
-          ? await _encodeFileForWeb(file)
-          : await _encodeFileInIsolate(file.path);
-
+      final base64 = await file.getBase64();
       widget.onFileChosen(
         // ignore: lines_longer_than_80_chars
-        'data:${file.mimeType};name=${file.name};base64,$encodedFile',
+        base64,
       );
 
       setState(() {
-        _file = file;
-        _fileName = _file!.name.isEmpty
-            ? DateTime.now().toIso8601String()
-            : _file!.name;
+        _file = base64;
+        _fileName =
+            file.name.isEmpty ? DateTime.now().toIso8601String() : file.name;
       });
-    }
-  }
-
-  /// Encoding for Web
-  Future<String> _encodeFileForWeb(XFile selectedFile) async {
-    try {
-      final bytes = await selectedFile.readAsBytes();
-      return base64Encode(bytes);
-    } catch (e) {
-      throw Exception('Failed to encode file on web: $e');
-    }
-  }
-
-  /// Encoding for Non-Web Platforms
-  Future<String> _encodeFileInIsolate(String filePath) async {
-    final receivePort = ReceivePort();
-
-    /// Spawn the isolate for heavy computation
-    await Isolate.spawn(_isolateEncode, [filePath, receivePort.sendPort]);
-
-    final response = await receivePort.first;
-
-    if (response is String) {
-      return response;
-    } else {
-      throw Exception('Failed to encode file in isolate.');
-    }
-  }
-
-  /// Isolate Function
-  static void _isolateEncode(List<dynamic> args) {
-    final filePath = args[0] as String;
-    final sendPort = args[1] as SendPort;
-
-    try {
-      // Perform the encoding synchronously within the isolate
-      final file = File(filePath);
-      final bytes = file.readAsBytesSync();
-      final base64String = base64Encode(bytes);
-
-      // Send the Base64 string result back
-      sendPort.send(base64String);
-    } catch (e) {
-      sendPort.send('Error: $e');
     }
   }
 }

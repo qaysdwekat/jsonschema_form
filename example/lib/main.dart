@@ -1,11 +1,14 @@
 import 'dart:convert';
+import 'dart:developer';
 
 import 'package:example/json_pretifier.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:jsonschema_form/jsonschema_form.dart';
 
-void main() {
+void main() async {
+  await CameraService().initAvailableCameras();
+
   runApp(const MyApp());
 }
 
@@ -53,7 +56,6 @@ class _FormState extends State<_Form> {
     "property_dependencies_with_data",
     "schema_dependencies_with_data",
     "files",
-    "jobsite_images",
     "problem_identification_with_data",
     "site_safety_with_data",
     "temporary_steps_and_solution_with_data",
@@ -63,12 +65,16 @@ class _FormState extends State<_Form> {
     "array_with_multiple_choice_with_data",
     "array_of_files",
     "materials_request",
-    "problem_and_root_cause"
+    "problem_and_root_cause",
+    "jobsite_images",
+    "permanent_materials_request",
+    "site_safety",
+    "permanent_solution"
   ];
 
   String? selectedFileName;
 
-  final _formKey = GlobalKey<FormState>();
+  final _jsonschemaFormKey = GlobalKey<JsonschemaFormBuilderState>();
 
   @override
   void initState() {
@@ -129,35 +135,28 @@ class _FormState extends State<_Form> {
               Container(
                 constraints: const BoxConstraints(minWidth: 200, maxWidth: 600),
                 width: MediaQuery.sizeOf(context).width * 0.4,
-                child: SingleChildScrollView(
-                  child: Column(
-                    children: [
-                      JsonschemaFormBuilder(
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: JsonschemaFormBuilder(
+                        key: _jsonschemaFormKey,
                         jsonSchemaForm: _jsonschemaForm,
-                        formKey: _formKey,
                       ),
-                      const SizedBox(height: 10),
-                      ElevatedButton(
-                        onPressed: () {
-                          final isFormValid =
-                              _formKey.currentState?.validate() ?? false;
+                    ),
+                    const SizedBox(height: 10),
+                    ElevatedButton(
+                      onPressed: () {
+                        final clearedFormData =
+                            _jsonschemaFormKey.currentState?.submit();
 
-                          if (isFormValid && _jsonschemaForm.formData != null) {
-                            final newFormData = Map<String, dynamic>.from(
-                                _jsonschemaForm.formData!);
-
-                            newFormData.removeEmptySubmaps();
-
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                              content: Text(newFormData.toString()),
-                              backgroundColor: Colors.green,
-                            ));
-                          }
-                        },
-                        child: const Text('Submit'),
-                      ),
-                    ],
-                  ),
+                        if (clearedFormData != null &&
+                            _jsonschemaForm.formData != null) {
+                          log(clearedFormData.toString());
+                        }
+                      },
+                      child: const Text('Submit'),
+                    ),
+                  ],
                 ),
               ),
             ],

@@ -6,14 +6,24 @@ class _ArrayForm extends StatefulWidget {
     required this.jsonKey,
     required this.uiSchema,
     required this.formData,
+    required this.previousSchema,
+    required this.previousJsonKey,
+    required this.previousUiSchema,
     required this.buildJsonschemaForm,
-    required this.readOnly,
+    required this.getReadOnly,
+    required this.getIsRequired,
+    required this.onItemAdded,
+    required this.onItemRemoved,
+    required this.scrollToBottom,
   });
 
   final JsonSchema jsonSchema;
   final String? jsonKey;
   final UiSchema? uiSchema;
   final dynamic formData;
+  final String? previousJsonKey;
+  final JsonSchema? previousSchema;
+  final UiSchema? previousUiSchema;
   final Widget Function(
     JsonSchema jsonSchema,
     String? jsonKey,
@@ -21,15 +31,22 @@ class _ArrayForm extends StatefulWidget {
     dynamic formData, {
     JsonSchema? previousSchema,
     String? previousJsonKey,
+    UiSchema? previousUiSchema,
     int? arrayIndex,
   }) buildJsonschemaForm;
-  final bool readOnly;
+  final bool Function() getReadOnly;
+  final bool Function() getIsRequired;
+  final void Function(JsonSchema)? onItemAdded;
+  final void Function()? onItemRemoved;
+  final void Function() scrollToBottom;
 
   @override
   State<_ArrayForm> createState() => _ArrayFormState();
 }
 
 class _ArrayFormState extends State<_ArrayForm> {
+  final _formFieldKey = GlobalKey<FormFieldState<dynamic>>();
+
   final List<JsonSchema> _arrayItems = [];
 
   final List<Widget> _initialItems = [];
@@ -75,8 +92,9 @@ class _ArrayFormState extends State<_ArrayForm> {
             widget.uiSchema,
             widget.formData,
             arrayIndex: i + initialItemsLength,
-            previousSchema: widget.jsonSchema,
-            previousJsonKey: widget.jsonKey,
+            previousSchema: widget.previousSchema,
+            previousJsonKey: widget.previousJsonKey,
+            previousUiSchema: widget.previousUiSchema,
           ),
         );
       }
@@ -100,8 +118,9 @@ class _ArrayFormState extends State<_ArrayForm> {
             widget.uiSchema,
             widget.formData,
             arrayIndex: initialItemsLength,
-            previousSchema: widget.jsonSchema,
-            previousJsonKey: widget.jsonKey,
+            previousSchema: widget.previousSchema,
+            previousJsonKey: widget.previousJsonKey,
+            previousUiSchema: widget.previousUiSchema,
           ),
         );
       }
@@ -125,8 +144,9 @@ class _ArrayFormState extends State<_ArrayForm> {
           widget.uiSchema,
           widget.formData,
           arrayIndex: i + initialItemsLength,
-          previousSchema: widget.jsonSchema,
-          previousJsonKey: widget.jsonKey,
+          previousSchema: widget.previousSchema,
+          previousJsonKey: widget.previousJsonKey,
+          previousUiSchema: widget.previousUiSchema,
         ),
       );
     }
@@ -149,17 +169,24 @@ class _ArrayFormState extends State<_ArrayForm> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ..._initialItems,
-        ..._buildArrayItems(),
-      ],
+    return _CustomFormFieldValidator<bool>(
+      formFieldKey: _formFieldKey,
+      isEnabled: widget.getIsRequired(),
+      initialValue: _arrayItems.length == _initialItems.length ? null : true,
+      childFormBuilder: (field) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ..._initialItems,
+            ..._buildArrayItems(field),
+          ],
+        );
+      },
     );
   }
 
-  List<Widget> _buildArrayItems() {
+  List<Widget> _buildArrayItems(FormFieldState<bool>? field) {
     final items = <Widget>[];
 
     /// Builds items that user has added using (+) button from the form
@@ -172,6 +199,13 @@ class _ArrayFormState extends State<_ArrayForm> {
         }
 
         _arrayItems.removeAt(i);
+
+        /// If the array has a required validator, then when there is a removed
+        /// item by the user, we let the validator knows that is invalid if
+        /// there are no more items added by the user
+        if (_arrayItems.length == _initialItems.length) {
+          field?.didChange(null);
+        }
       });
 
       final castedListOfMaps = DynamicUtils.tryParseListOfMaps(widget.formData);
@@ -186,6 +220,13 @@ class _ArrayFormState extends State<_ArrayForm> {
               : null
           : widget.uiSchema;
 
+      final previousUiSchema = castedListOfMaps != null
+          ? (widget.uiSchema?.children != null &&
+                  widget.uiSchema!.children!.containsKey('items'))
+              ? widget.uiSchema
+              : null
+          : widget.previousUiSchema;
+
       items.add(
         widget.buildJsonschemaForm(
           _arrayItems[i],
@@ -195,6 +236,7 @@ class _ArrayFormState extends State<_ArrayForm> {
           arrayIndex: i + _initialItems.length,
           previousSchema: widget.jsonSchema,
           previousJsonKey: castedListOfMaps != null ? widget.jsonKey : null,
+          previousUiSchema: previousUiSchema,
         ),
       );
     }
@@ -218,7 +260,7 @@ class _ArrayFormState extends State<_ArrayForm> {
       final addButton = Align(
         alignment: Alignment.centerRight,
         child: IconButton(
-          onPressed: widget.readOnly
+          onPressed: widget.getReadOnly()
               ? null
               : () {
                   _modifyFormData();
@@ -226,11 +268,24 @@ class _ArrayFormState extends State<_ArrayForm> {
                   final hasAdditionalItems =
                       widget.jsonSchema.additionalItems != null;
 
+                  final JsonSchema newItem;
                   if (hasAdditionalItems) {
-                    _addArrayItem(widget.jsonSchema.additionalItems!);
+                    newItem = widget.jsonSchema.additionalItems!;
                   } else {
-                    _addArrayItem(widget.jsonSchema.items as JsonSchema);
+                    newItem = widget.jsonSchema.items as JsonSchema;
                   }
+
+                  _addArrayItem(newItem);
+
+                  /// If the array has a required validator, then when there is
+                  /// an item added by the user, we will let the validator known
+                  /// that is valid because user added an item
+                  if (_arrayItems.length > _initialItems.length) {
+                    field?.didChange(true);
+                  }
+
+                  widget.onItemAdded?.call(newItem);
+                  widget.scrollToBottom.call();
                 },
           icon: const Icon(Icons.add),
         ),
@@ -267,13 +322,15 @@ class _ArrayFormState extends State<_ArrayForm> {
     if (hasRemoveButton) {
       final removeButton = Align(
         alignment: Alignment.centerRight,
-        child: widget.readOnly
+        child: widget.getReadOnly()
             ? null
             : IconButton(
                 onPressed: () {
                   onRemovePressed();
 
                   setState(() {});
+
+                  widget.onItemRemoved?.call();
                 },
                 icon: const Icon(Icons.remove),
               ),
