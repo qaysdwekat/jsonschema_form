@@ -163,16 +163,16 @@ class _CameraScreenState extends State<CameraScreen>
                             ),
                           ),
                           onPressed: () async {
-                            setState(() {
-                              iscamerafront = !iscamerafront;
-                              transform = transform + pi;
-                            });
+                            iscamerafront = !iscamerafront;
                             final cameraPos = iscamerafront ? 0 : 1;
                             _cameraController = CameraController(
                               cameras[cameraPos],
                               ResolutionPreset.high,
                             );
                             cameraValue = _cameraController?.initialize();
+                            setState(() {
+                              transform = transform + pi;
+                            });
                           },
                         )
                       else
